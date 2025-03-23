@@ -578,7 +578,7 @@ async fn process_upload_bytes(
         file.flush().await?;
     }
 
-    Ok(content_hash)
+    Ok(filename)
 }
 
 fn add_cors_headers(res: &mut http::Response<http_body_util::Full<Bytes>>) {
