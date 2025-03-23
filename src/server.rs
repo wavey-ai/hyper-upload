@@ -261,6 +261,7 @@ async fn handle_request_h2(
         }
     }
 
+    let method = req.method().clone();
     let (status, data, content_type, content_encoding) = request_handler(
         req.method(),
         req.uri().path(),
@@ -268,8 +269,16 @@ async fn handle_request_h2(
         cache.clone(),
     )
     .await?;
+
     if let (Some(data), Some(content_type)) = (data, content_type) {
-        let mut response = Response::new(Full::from(data.0));
+        // For HEAD requests, return headers but with empty body
+        let body = if method == Method::HEAD {
+            Full::default()
+        } else {
+            Full::from(data.0)
+        };
+
+        let mut response = Response::new(body);
         *response.status_mut() = status;
         response.headers_mut().insert(
             "alt-srv",
@@ -356,6 +365,7 @@ async fn handle_request_h3(
         return Ok(stream.finish().await?);
     }
 
+    let method = req.method().clone();
     let (status, data, content_type, content_encoding) =
         request_handler(req.method(), req.uri().path(), req.uri().query(), cache).await?;
 
@@ -380,7 +390,10 @@ async fn handle_request_h3(
             }
         }
 
-        stream.send_data(data.0).await?;
+        // Only send data for GET requests, not for HEAD
+        if method != Method::HEAD {
+            stream.send_data(data.0).await?;
+        }
     } else {
         let resp = http::Response::builder()
             .status(status)
@@ -415,13 +428,13 @@ async fn request_handler(
 > {
     let res = match (method, path) {
         (&Method::OPTIONS, _) => (StatusCode::OK, None, None, None),
-        (&Method::HEAD, _) => (StatusCode::NOT_IMPLEMENTED, None, None, None),
-        (&Method::GET, path) => {
+        (&Method::HEAD, path) | (&Method::GET, path) => {
             let keys: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
 
             if !keys.is_empty() && keys[0] == "up" {
                 (
                     StatusCode::OK,
+                    // For HEAD requests, we'll handle it later to not return the body
                     Some((Bytes::from("OK"), 0)),
                     Some("text/plain".into()),
                     None,
@@ -439,6 +452,7 @@ async fn request_handler(
 
                         (
                             StatusCode::OK,
+                            // For HEAD requests, we'll handle it later to not return the body
                             Some((bytes, etag)),
                             Some(mime_type),
                             content_encoding,
@@ -527,7 +541,7 @@ async fn process_upload(
         file.flush().await?;
     }
 
-    Ok(content_hash)
+    Ok(filename)
 }
 
 async fn process_upload_bytes(
