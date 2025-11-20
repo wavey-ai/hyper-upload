@@ -807,6 +807,7 @@ dependencies = [
  "structopt",
  "tls-helpers",
  "tokio",
+ "tokio-rustls",
  "tracing",
  "tracing-subscriber",
  "url",

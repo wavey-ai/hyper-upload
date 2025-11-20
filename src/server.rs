@@ -14,7 +14,7 @@ use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tls_helpers::{load_certs_from_base64, load_keys_from_base64, tls_acceptor_from_base64};
+use tls_helpers::{load_certs_from_base64, load_keys_from_base64};
 use tokio::net::TcpListener;
 use tokio::sync::{oneshot, watch};
 use tracing::{error, info};
@@ -60,12 +60,16 @@ impl HyperStatic {
 
         {
             let addr = SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), self.ssl_port);
-            let tls_acceptor = tls_acceptor_from_base64(
-                &self.fullchain_pem_base64,
-                &self.privkey_pem_base64,
-                false,
-                true,
-            )?;
+            // Build a TLS acceptor that advertises both h2 and http/1.1 via ALPN
+            // so hyper's auto server can negotiate either protocol.
+            let certs = load_certs_from_base64(&self.fullchain_pem_base64)?;
+            let key = load_keys_from_base64(&self.privkey_pem_base64)?;
+            let mut tls_cfg = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+                .unwrap();
+            tls_cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_cfg));
 
             let ssl_port = self.ssl_port;
             let srv_h2 = {
